@@ -1,12 +1,13 @@
-// -- mainRoom.js
+// -- class/mainRoom.js
 const SubRoom       = require('./subRoom');
+const BaseRoom       = require('./BaseRoom');
 const logger        = require("../utilities/logger");
 const retry         = require('retry');
-const config        = require('./config');
 const CPU_THRESHOLD =  parseInt(process.env.CPU_THRESHOLD_PER_SUB_ROOM) ||75;  // Maximum CPU usage percentage per SubRoom
 
-class MainRoom {
+class MainRoom extends BaseRoom {
     constructor(roomId, io, loadBalancer) {
+        super(roomId);
         this.subRooms            = new Map(); // Stores the list of SubRooms
         this.id                  = roomId;    // Main room ID
         this.io                  = io;        // Socket.io instance
@@ -14,7 +15,6 @@ class MainRoom {
         this.maxUsersPerSubRoom  = parseInt(process.env.MAX_USERS_PER_SUB_ROOM) || 400; // Maximum users per SubRoom
         this.lastSubRoomId       = 0;         // Last assigned SubRoom ID
         this.producers           = [];        // List of media producers
-        this.pipeTransports      = new Map(); // Stores PipeTransports
         this.chatHistory         = [];
     }
 
@@ -64,6 +64,7 @@ class MainRoom {
     //     }
     //     const subRoomId = ++this.lastSubRoomId;
     //     const subRoom = new SubRoom(subRoomId, worker, this.io, this.id);
+    //     await subRoom.init();
     //     this.subRooms.set(subRoomId, subRoom);
     //     this.loadBalancer.updateWorkerLoad(worker, +1);
     //     return subRoom;
@@ -88,6 +89,7 @@ class MainRoom {
 
                     const subRoomId = ++this.lastSubRoomId;
                     const subRoom   = new SubRoom(subRoomId, worker, this.io, this.id);
+                    await subRoom.init();
 
                     this.subRooms.set(subRoomId, subRoom);
                     this.loadBalancer.updateWorkerLoad(worker, +1);
@@ -154,6 +156,7 @@ class MainRoom {
         const subRoom = this.subRooms.get(subRoomId);
 
         if (subRoom) {
+            await subRoom.close();
             this.subRooms.delete(subRoomId);
             this.loadBalancer.updateWorkerLoad(subRoom.worker, -1);
         }
@@ -165,7 +168,7 @@ class MainRoom {
             await this.removeSubRoom(subRoom.id);
         }
 
-        this.pipeTransports.clear();
+        await this.closePipeResources();
         this.io.to(this.id).emit('roomClosed');
     }
 
@@ -213,41 +216,25 @@ class MainRoom {
         }
     }
 
-
-    async connectToRemoteRouter(sourceSubRoom, remoteIp, remotePort, remoteProducerId, remoteRtpCapabilities) {
-        const pipeTransport = await sourceSubRoom.router.createPipeTransport({
-            listenIp: '192.168.185.143',
-            enableSctp: false,
-            enableRtx: true,
-            enableSrtp: false,
-        });
-    
-        await pipeTransport.connect({
-            ip: remoteIp,
-            port: remotePort,
-        });
-    
-        const pipeConsumer = await pipeTransport.consume({
-            producerId: remoteProducerId,
-            rtpCapabilities: remoteRtpCapabilities,
-        });
-    
-        // save transport if needed
-    }
-
-    async  pipeProducerToRemoteServers(subRoom, producerId, rtpCapabilities) {
-        for (const remote of config.remoteServers) {
-          sendToServer(remote.id, {
-            type: 'new-producer',
-            producerId,
-            rtpCapabilities,
-            subRoomId: subRoom.id,
-            serverId: config.serverId
-          });
+    findProducerAcrossSubRooms(producerId, excludeSubRoomId) {
+        for (const [subRoomId, subRoom] of this.subRooms.entries()) {
+            if (subRoomId !== excludeSubRoomId) {
+                const producer = this.getProducer(producerId);
+                if (producer) {
+                    return { producer, router: subRoom.router };
+                }
+            }
         }
+        return { producer: null, router: null };
     }
 
-
+    getDumpState() {
+        return {
+            roomId: this.id,
+            subRoomCount: this.subRooms.size,
+            ...super.getDumpPipeState()
+        };
+    }
 }
 
 module.exports = MainRoom;

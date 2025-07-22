@@ -1,4 +1,3 @@
-// -- config.js
 const os     = require('os');
 const ifaces = os.networkInterfaces();
 
@@ -26,10 +25,7 @@ module.exports = {
     listenPort             : process.env.SERVER_PORT || 5000, // Server port with an environment variable fallback
     sslCrt                 : '../ssl/cert.pem', // Path to SSL certificate file
     sslKey                 : '../ssl/key.pem', // Path to SSL key file
-    remoteServers          : [
-        { id: 'media-server-2', ip: '192.168.185.150', wsPort: 4000 },
-        { id: 'media-server-3', ip: '192.168.185.151', wsPort: 4000 },
-    ],
+    
     mediasoup  : {
         // Worker settings
         numWorkers: Math.max(os.cpus().length - 1, 1), // Number of Mediasoup workers, at least 1

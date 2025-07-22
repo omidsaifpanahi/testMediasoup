@@ -164,16 +164,20 @@ module.exports = async (io, roomList) => {
                 let producerList = currentMainRoom.producers;
 
                 for (const producer of producerList) {
-                    if ( producer.subRoomId !== currentSubRoom.id && isSubRoomCreated){
-                        let subRoom = currentMainRoom.subRooms.get( producer.subRoomId );
-                        try {
-                            await subRoom.router.pipeToRouter({
-                                'producerId': producer['producerId'],
-                                'router': currentSubRoom.router,
-                                'keyFrameRequestDelay': 1000
-                            });
-                        }catch (error) {
-                            logger.warn('error on pipeToRouter in socketHandler',{...metaLog, error: error.message});
+                    if ( producer.subRoomId !== currentSubRoom.id && isSubRoomCreated) {
+                        const subRoom = currentMainRoom.subRooms.get(producer.subRoomId);
+                        const alreadyPiped = currentSubRoom.pipedConsumers.has(producer.producerId);
+            
+                        if (!alreadyPiped) {
+                            try {
+                                await subRoom.router.pipeToRouter({
+                                    producerId: producer.producerId,
+                                    router: currentSubRoom.router,
+                                    keyFrameRequestDelay: 1000
+                                });
+                            } catch (error) {
+                                logger.warn('error on pipeToRouter in socketHandler', {...metaLog, error: error.message});
+                            }
                         }
                     }
                 }
@@ -275,7 +279,7 @@ module.exports = async (io, roomList) => {
                     if(result['success'])
                     {
                         try {
-                            await currentMainRoom.pipeProducerToOtherSubRooms(currentSubRoom, result['producerId']);
+                            await currentMainRoom.pipeProducerToOtherSubRooms(currentSubRoom, result['producerId']);                            
                         } catch (error) {
                             logger.warn('pipeToRouter failed in produce:', { ...metaLog, error: error.message });
                         }
@@ -296,7 +300,11 @@ module.exports = async (io, roomList) => {
                         };
                         currentSubRoom.broadCast(socket.id, 'newProducers', [options]);                
 
-                        currentMainRoom.producers.push(options);                
+                        currentMainRoom.producers.push(options);
+                        
+                        
+                        // Optional: Pipe to remote server if needed
+                        // await currentSubRoom.pipeProducerToRemoteServer(result['producerObject'], remoteServerUrl);
                     }
                     else{
                         logger.error(result['message'],{

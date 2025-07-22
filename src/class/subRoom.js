@@ -1,20 +1,25 @@
-// -- subRoom.js
+// -- class/subRoom.js
 const config = require('../config/config');
 const logger = require('../utilities/logger');
+const BaseRoom = require('./BaseRoom');
 
-module.exports = class SubRoom {
+module.exports = class SubRoom extends BaseRoom {
     constructor(subRoomId, worker, io, mainRoomId) {
+        super(mainRoomId); // برای مدیریت pipe
         this.mainRoomId   = mainRoomId;
         this.id           = subRoomId;
         this.worker       = worker;
         this.peers        = new Map();    // Map to manage connected peers in the room
         this.io           = io;          // Reference to the Socket.IO server instance
+        this.router       = null;
+        this.routerReady  = false;        
+    }
 
+    async init() {
         // Create a router for media management
         const mediaCodecs = config.mediasoup.router.mediaCodecs;
-        worker.createRouter({mediaCodecs}).then((router) => {
-            this.router = router; // Store the router instance
-        });
+        this.router       = await this.worker.createRouter({ mediaCodecs });  // Store the router instance
+        this.routerReady  = true;
     }
 
     // Add a new peer to the room
@@ -39,10 +44,11 @@ module.exports = class SubRoom {
             initialAvailableOutgoingBitrate
         };
 
+        const peer = this.peers.get(socketId);
         const metaLog = {
             socketId    : socketId,
             roomId      : this.mainRoomId,
-            userId      : this.peers.get(socketId).userId,
+            userId      : peer?.userId,
             subRoomId   : this.id          
         };
 
@@ -57,24 +63,24 @@ module.exports = class SubRoom {
                 logger.error('Error setting max incoming bitrate:', {...metaLog, error: error.message});
             }
         }
-        metaLog['transportId'] = transport.id;
+        metaLog.transportId = transport.id;
 
         // Handle state changes in the transport's DTLS connection
         transport.on('dtlsstatechange', (dtlsState) => {
             if (dtlsState === 'closed') {
-                logger.info('Transport close',metaLog );
-                transport.close(); // Close the transport if DTLS is closed
+                logger.info('Transport closed by DTLS', metaLog);
+                transport.close();
             }
         });
 
         // Log and handle transport closure
         transport.on('close', () => {
-            logger.info('Transport close', metaLog);
+            logger.info('Transport closed', metaLog);
         });
 
 
         // Add the transport to the peer's transport list
-        this.peers.get(socketId).addTransport(transport);
+        peer.addTransport(transport);
 
         // Return transport parameters to the client
         return {
@@ -89,12 +95,8 @@ module.exports = class SubRoom {
 
     // Connect a peer's transport using DTLS parameters
     async connectPeerTransport(socketId, transportId, dtlsParameters) {
-        if (!this.peers.has(socketId))
-        {
-            return {
-                success : false,
-                message : `User not found`
-            };
+        if (!this.peers.has(socketId)) {
+            return { success: false, message: `User not found` };
         }
 
         // Connect the specified transport for the peer
@@ -106,49 +108,35 @@ module.exports = class SubRoom {
         
         // Attempt to get the peer and create a producer
         const peer = this.peers.get(socketId);
-
-        if (!peer)
-        {
-            return {
-                success : false,
-                message : `User with socketId not found`,
-            };
+        if (!peer) {
+            return { success: false, message: `User with socketId not found` };
         }
 
         return  await peer.createProducer(producerTransportId, rtpParameters, kind, mediaType);
     }
 
     // Create a consumer for a peer to receive media from a producer
-    async consume(socketId, consumerTransportId, rtpCapabilities,producer,subRoomId) {
-        if (!this.router.canConsume({producerId: producer.producerId, rtpCapabilities})) {
-            return {
-                success : false,
-                message : `Peer cannot consume producer`,
-            };
+    async consume(socketId, consumerTransportId, rtpCapabilities, producer, subRoomId) {
+        if (!this.router.canConsume({ producerId: producer.producerId, rtpCapabilities })) {
+            return { success: false, message: `Peer cannot consume producer` };
         }
 
         try {
             const peer = this.peers.get(socketId);
             if (!peer) {
-                return {
-                    success : false,
-                    message : `User with socketId not found`,
-                };
+                return { success: false, message: `User with socketId not found` };
             }
 
-            const result = await peer.createConsumer(consumerTransportId, producer.producerId, rtpCapabilities,);
+            const result = await peer.createConsumer(consumerTransportId, producer.producerId, rtpCapabilities);
 
-            if(!result['success'])
-                return result;
+            if (!result.success) return result;
 
             // Handle the case when the producer is closed
-            result['consumer'].on('producerclose', () => {
-
+            result.consumer.on('producerclose', () => {
                 if (this.peers.has(socketId))
                 {
                     const peer = this.peers.get(socketId);
-
-                    peer.removeConsumer(result['consumer'].id);
+                    peer.removeConsumer(result.consumer.id);
 
                     const metaLog = {
                         socketId,
@@ -163,15 +151,9 @@ module.exports = class SubRoom {
                 }
             });
 
-            return {
-                success : true,
-                params : result['params']
-            };
+            return { success: true, params: result.params };
         } catch (error) {
-            return {
-                success : false,
-                message : `Failed to create consumer: ${error.message}`,
-            };
+            return { success: false, message: `Failed to create consumer: ${error.message}` };
         }
     }
 
@@ -180,15 +162,12 @@ module.exports = class SubRoom {
         if (this.peers.has(socketId)) {
             const peer = this.peers.get(socketId);
             const result = peer.close();
-            if(result['success']){
+            if (result.success) {
                 this.peers.delete(socketId);
-            }            
-            return result;            
+            }
+            return result;
         } else {
-            return {
-                success: false,
-                message: 'Attempted to remove non-existing peer',
-            };
+            return { success: false, message: 'Attempted to remove non-existing peer' };
         }
     }
 
@@ -204,7 +183,7 @@ module.exports = class SubRoom {
 
     // Get all connected peers in the room
     getPeers() {
-        let peers = [];
+        const peers = [];
         this.peers.forEach(p => {
             peers.push({
                 subRoomId:this.id,
@@ -221,33 +200,32 @@ module.exports = class SubRoom {
         return this.peers.size;
     }
 
-    close() {
-        this.router.close();
-        this.peers.forEach(peer => peer.close());
-        this.peers.clear();
-        logger.info(` SubRoom closed`,{ roomId : this.mainRoomId, subRoomId : this.id });
+    async pipeProducerToRemoteServer(producer, remoteServerUrl) {
+        await this.pipeManager.pipeProducer({
+            roomId: this.mainRoomId,
+            producer,
+            localRouter: this.router,
+            remoteServerUrl
+        });
     }
 
-    async  pipeFromRemoteProducer(remoteProducerId, remoteRtpCapabilities, remoteServerId) {
-        const pipeTransport = await this.router.createPipeTransport({
-          listenIp: '192.168.185.150', // این سرور
-          enableSctp: false,
-          enableRtx: true,
-          enableSrtp: false
-        });
-      
-        // فرض: IP و پورت ثابت سرور مقابل
-        await pipeTransport.connect({
-          ip: '192.168.185.143', // IP سرور مقابل
-          port: 5000 // حتما باید pipeTransport طرف مقابل listen کنه
-        });
-      
-        const consumer = await pipeTransport.consume({
-          producerId: remoteProducerId,
-          rtpCapabilities: remoteRtpCapabilities,
-          paused: false
-        });
-      
-        this.remoteConsumers.set(consumer.id, consumer);
-      }
+    addPipedConsumer(producerId, consumer) {
+        if (!this.pipedConsumers.has(producerId)) {
+            this.pipedConsumers.set(producerId, []);
+        }
+        this.pipedConsumers.get(producerId).push(consumer);
+    }
+
+    async close() {
+        if (this.router) {
+            this.router.close();
+        }
+        
+        this.peers.forEach(peer => peer.close());
+        this.peers.clear();
+
+        await this.closePipeResources();
+
+        logger.info(` SubRoom closed`,{ roomId : this.mainRoomId, subRoomId : this.id });
+    }
 }
