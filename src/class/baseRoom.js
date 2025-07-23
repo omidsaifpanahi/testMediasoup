@@ -1,5 +1,5 @@
 // path: src/class/BaseRoom.js
-const PipeManagerREST = require('./pipeManager');
+const PipeManagerREST = require('./pipeManagerREST');
 class BaseRoom {
     constructor(mainRoomId) {
         this.mainRoomId = mainRoomId;
