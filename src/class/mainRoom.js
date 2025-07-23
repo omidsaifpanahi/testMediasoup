@@ -1,29 +1,26 @@
-// -- class/mainRoom.js
+// path: src/class/mainRoom.js
 const SubRoom       = require('./subRoom');
-const BaseRoom       = require('./BaseRoom');
+const BaseRoom      = require('./baseRoom');
 const logger        = require("../utilities/logger");
 const retry         = require('retry');
-const CPU_THRESHOLD =  parseInt(process.env.CPU_THRESHOLD_PER_SUB_ROOM) ||75;  // Maximum CPU usage percentage per SubRoom
-
+const CPU_THRESHOLD = parseInt(process.env.CPU_THRESHOLD_PER_SUB_ROOM) || 75;
 class MainRoom extends BaseRoom {
     constructor(roomId, io, loadBalancer) {
         super(roomId);
-        this.subRooms            = new Map(); // Stores the list of SubRooms
-        this.id                  = roomId;    // Main room ID
-        this.io                  = io;        // Socket.io instance
-        this.loadBalancer        = loadBalancer; // Load balancer instance
-        this.maxUsersPerSubRoom  = parseInt(process.env.MAX_USERS_PER_SUB_ROOM) || 400; // Maximum users per SubRoom
-        this.lastSubRoomId       = 0;         // Last assigned SubRoom ID
-        this.producers           = [];        // List of media producers
+        this.subRooms            = new Map();
+        this.id                  = roomId;
+        this.io                  = io;
+        this.loadBalancer        = loadBalancer;
+        this.maxUsersPerSubRoom  = parseInt(process.env.MAX_USERS_PER_SUB_ROOM) || 400;
+        this.lastSubRoomId       = 0;
+        this.producers           = [];
         this.chatHistory         = [];
     }
 
-    // Get the SubRoom with the least number of users
     async getLeastLoadedSubRoom() {
         let leastLoadedSubRoom = null;
         let minPeerCount       = Infinity;
 
-        // Iterate over all SubRooms to find the one with the least users
         for (const subRoom of this.subRooms.values()) {
             const peerCount = subRoom.getPeerCount();
             if (peerCount < this.maxUsersPerSubRoom) {
@@ -32,11 +29,11 @@ class MainRoom extends BaseRoom {
             }
         }
 
-        const result = {success : false};
-        // Check CPU usage of the selected SubRoom
-        if(leastLoadedSubRoom !== null) {
+        const result = { success: false };
+
+        if (leastLoadedSubRoom !== null) {
             if (!leastLoadedSubRoom.worker) {
-                return {...result,message: 'No worker found for subRoom ( '+ leastLoadedSubRoom.id+' )' || 'unknown'};
+                return { ...result, message: 'No worker found for subRoom ( ' + leastLoadedSubRoom.id + ' )' || 'unknown' };
             }
 
             try {
@@ -46,37 +43,22 @@ class MainRoom extends BaseRoom {
                 const cpuUsagePercentage = (totalCpuTime / elapsedTime) * 100;
 
                 if (cpuUsagePercentage > CPU_THRESHOLD) {
-                    return {...result,message: 'CPU usage is too high, reject this SubRoom'};
+                    return { ...result, message: 'CPU usage is too high, reject this SubRoom' };
                 }
             } catch (error) {
-                return {...result,message: 'Failed to get resource usage from worker:'+error.message};  
+                return { ...result, message: 'Failed to get resource usage from worker:' + error.message };
             }
         }
 
-        return {success : true,leastLoadedSubRoom};
+        return { success: true, leastLoadedSubRoom };
     }
 
-    // async createSubRoom() {
-    //     const worker = await this.loadBalancer.getWorkerWithLeastConnections();
-    //     if (!worker) {
-    //         console.error('No available workers to create a new sub-room');
-    //         return null;
-    //     }
-    //     const subRoomId = ++this.lastSubRoomId;
-    //     const subRoom = new SubRoom(subRoomId, worker, this.io, this.id);
-    //     await subRoom.init();
-    //     this.subRooms.set(subRoomId, subRoom);
-    //     this.loadBalancer.updateWorkerLoad(worker, +1);
-    //     return subRoom;
-    // }
-
-    // Create a new SubRoom with retry mechanism in case of failure
     async createSubRoom() {
         const operation = retry.operation({
-            retries    : 3,       // Number of retry attempts
-            factor     : 2,       // Exponential backoff factor
-            minTimeout : 1000,    // Minimum delay between retries (ms)
-            maxTimeout : 5000,    // Maximum delay between retries (ms)
+            retries    : 3,
+            factor     : 2,
+            minTimeout : 1000,
+            maxTimeout : 5000,
         });
 
         return new Promise((resolve) => {
@@ -94,20 +76,19 @@ class MainRoom extends BaseRoom {
                     this.subRooms.set(subRoomId, subRoom);
                     this.loadBalancer.updateWorkerLoad(worker, +1);
 
-                    resolve(subRoom); // Return the created SubRoom on success
+                    resolve(subRoom);
                 } catch (error) {
                     if (operation.retry(error)) {
-                        logger.warn(`Retrying (${currentAttempt}) to create SubRoom...`,{roomId: this.id});
+                        logger.warn(`Retrying (${currentAttempt}) to create SubRoom...`, { roomId: this.id });
                         return;
                     }
-                    logger.warn('Failed to create SubRoom after retries:',{roomId: this.id,error:error.message} );
-                    resolve(null); // Return null if all retries fail
+                    logger.warn('Failed to create SubRoom after retries:', { roomId: this.id, error: error.message });
+                    resolve(null);
                 }
             });
         });
     }
 
-    // Get the total number of peers in all SubRooms
     async getTotalPeers() {
         let totalPeers = 0;
         this.subRooms.forEach(subRoom => {
@@ -116,7 +97,6 @@ class MainRoom extends BaseRoom {
         return totalPeers;
     }
 
-    // Get the total peers in all SubRooms
     async getAllPeers() {
         let persons     = [];
         const producers = this.producers;
@@ -126,14 +106,12 @@ class MainRoom extends BaseRoom {
             persons.push(...peers);
         });
 
-
         producers.forEach(p => {
-            persons.map(function(person) {        
-                if(person.socketId === p.socketId)
-                {                    
-                    person['produce'].push({           
-                        mediaType:p.mediaType,
-                        producerId:p.producerId
+            persons.map(function(person) {
+                if (person.socketId === p.socketId) {
+                    person['produce'].push({
+                        mediaType: p.mediaType,
+                        producerId: p.producerId
                     });
                 }
             });
@@ -141,9 +119,10 @@ class MainRoom extends BaseRoom {
 
         return persons;
     }
+
     broadCast(eventName, data, fromSocketId = null) {
         if (!this.io || !this.id) return;
-    
+
         if (fromSocketId) {
             this.io.to(this.id).except(fromSocketId).emit(eventName, data);
         } else {
@@ -151,7 +130,6 @@ class MainRoom extends BaseRoom {
         }
     }
 
-    // Remove a specific SubRoom
     async removeSubRoom(subRoomId) {
         const subRoom = this.subRooms.get(subRoomId);
 
@@ -162,7 +140,6 @@ class MainRoom extends BaseRoom {
         }
     }
 
-    // Destroy and close the main room along with all its SubRooms
     async destroyMainRoom() {
         for (const subRoom of this.subRooms.values()) {
             await this.removeSubRoom(subRoom.id);
@@ -172,7 +149,6 @@ class MainRoom extends BaseRoom {
         this.io.to(this.id).emit('roomClosed');
     }
 
-    // Get a specific producer by its ID
     getProducer(producerId) {
         const index = this.producers.findIndex(item => item.producerId === producerId);
         if (index !== -1) {
@@ -181,14 +157,13 @@ class MainRoom extends BaseRoom {
         return null;
     }
 
-    // Remove a specific producer by its ID
     removeProducerByPId(producerId) {
         try {
             const index = this.producers.findIndex(item => item.producerId === producerId);
             if (index !== -1) {
                 this.producers.splice(index, 1);
             }
-        } catch(e) {
+        } catch (e) {
             console.log(e);
         }
     }
@@ -198,20 +173,12 @@ class MainRoom extends BaseRoom {
     }
 
     async pipeProducerToOtherSubRooms(sourceSubRoom, producerId) {
-        const sourceRouter = sourceSubRoom.router;
-    
         for (const [, subRoom] of this.subRooms) {
             if (subRoom.id !== sourceSubRoom.id) {
-                try {
-                    await sourceRouter.pipeToRouter({
-                        producerId,
-                        router: subRoom.router,
-                        keyFrameRequestDelay: 1000
-                    });
-                } catch (error) {
-                    // Logging intentionally omitted
-                    throw new Error(`pipeToRouter failed from ${sourceSubRoom.id} to ${subRoom.id}: ${error.message}`);
-                }
+                const result = await this.pipeProducerToLocalRouter(subRoom.router, producerId, sourceSubRoom.router);
+                if (!result.success) {
+                    throw new Error(`pipeToRouter failed from ${sourceSubRoom.id} to ${subRoom.id}: ${result.message}`);                }
+
             }
         }
     }
@@ -227,14 +194,5 @@ class MainRoom extends BaseRoom {
         }
         return { producer: null, router: null };
     }
-
-    getDumpState() {
-        return {
-            roomId: this.id,
-            subRoomCount: this.subRooms.size,
-            ...super.getDumpPipeState()
-        };
-    }
 }
-
 module.exports = MainRoom;

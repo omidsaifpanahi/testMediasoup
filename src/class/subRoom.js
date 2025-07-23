@@ -1,38 +1,33 @@
-// -- class/subRoom.js
+// path: src/class/subRoom.js
 const config = require('../config/config');
 const logger = require('../utilities/logger');
-const BaseRoom = require('./BaseRoom');
-
+const BaseRoom = require('./baseRoom');
 module.exports = class SubRoom extends BaseRoom {
     constructor(subRoomId, worker, io, mainRoomId) {
-        super(mainRoomId); // برای مدیریت pipe
+        super(mainRoomId);
         this.mainRoomId   = mainRoomId;
         this.id           = subRoomId;
         this.worker       = worker;
-        this.peers        = new Map();    // Map to manage connected peers in the room
-        this.io           = io;          // Reference to the Socket.IO server instance
+        this.peers        = new Map();
+        this.io           = io;
         this.router       = null;
         this.routerReady  = false;        
     }
 
     async init() {
-        // Create a router for media management
         const mediaCodecs = config.mediasoup.router.mediaCodecs;
-        this.router       = await this.worker.createRouter({ mediaCodecs });  // Store the router instance
+        this.router       = await this.worker.createRouter({ mediaCodecs });
         this.routerReady  = true;
     }
 
-    // Add a new peer to the room
     addPeer(peer) {
         this.peers.set(peer.id, peer);
     }
 
-    // Get the RTP capabilities of the router for clients
     getRtpCapabilities() {
         return this.router.rtpCapabilities;
     }
 
-    // Create a WebRTC transport for a specific peer
     async createWebRtcTransport(socketId) {
         const {maxIncomingBitrate, initialAvailableOutgoingBitrate} = config.mediasoup.webRtcTransport;
 
@@ -52,12 +47,9 @@ module.exports = class SubRoom extends BaseRoom {
             subRoomId   : this.id          
         };
 
-        // Create the WebRTC transport
         const transport = await this.router.createWebRtcTransport(options);
-        if (maxIncomingBitrate)
-        {
+        if (maxIncomingBitrate) {
             try {
-                // Set maximum incoming bitrate if specified
                 await transport.setMaxIncomingBitrate(maxIncomingBitrate);
             } catch (error) {
                 logger.error('Error setting max incoming bitrate:', {...metaLog, error: error.message});
@@ -65,7 +57,6 @@ module.exports = class SubRoom extends BaseRoom {
         }
         metaLog.transportId = transport.id;
 
-        // Handle state changes in the transport's DTLS connection
         transport.on('dtlsstatechange', (dtlsState) => {
             if (dtlsState === 'closed') {
                 logger.info('Transport closed by DTLS', metaLog);
@@ -73,16 +64,12 @@ module.exports = class SubRoom extends BaseRoom {
             }
         });
 
-        // Log and handle transport closure
         transport.on('close', () => {
             logger.info('Transport closed', metaLog);
         });
 
-
-        // Add the transport to the peer's transport list
         peer.addTransport(transport);
 
-        // Return transport parameters to the client
         return {
             params: {
                 id             : transport.id,
@@ -93,29 +80,23 @@ module.exports = class SubRoom extends BaseRoom {
         };
     }
 
-    // Connect a peer's transport using DTLS parameters
     async connectPeerTransport(socketId, transportId, dtlsParameters) {
         if (!this.peers.has(socketId)) {
             return { success: false, message: `User not found` };
         }
 
-        // Connect the specified transport for the peer
         return await this.peers.get(socketId).connectTransport(transportId, dtlsParameters);
     }
 
-    // Create a producer for a peer
     async produce(socketId, producerTransportId, rtpParameters, kind, mediaType) {
-        
-        // Attempt to get the peer and create a producer
         const peer = this.peers.get(socketId);
         if (!peer) {
             return { success: false, message: `User with socketId not found` };
         }
 
-        return  await peer.createProducer(producerTransportId, rtpParameters, kind, mediaType);
+        return await peer.createProducer(producerTransportId, rtpParameters, kind, mediaType);
     }
 
-    // Create a consumer for a peer to receive media from a producer
     async consume(socketId, consumerTransportId, rtpCapabilities, producer, subRoomId) {
         if (!this.router.canConsume({ producerId: producer.producerId, rtpCapabilities })) {
             return { success: false, message: `Peer cannot consume producer` };
@@ -131,10 +112,8 @@ module.exports = class SubRoom extends BaseRoom {
 
             if (!result.success) return result;
 
-            // Handle the case when the producer is closed
             result.consumer.on('producerclose', () => {
-                if (this.peers.has(socketId))
-                {
+                if (this.peers.has(socketId)) {
                     const peer = this.peers.get(socketId);
                     peer.removeConsumer(result.consumer.id);
 
@@ -145,8 +124,7 @@ module.exports = class SubRoom extends BaseRoom {
                         producer
                     };
 
-                    logger.info('Consumer closed due to producer close event', {...metaLog,roomId:this.mainRoomId,subRoomId});
-
+                    logger.info('Consumer closed due to producer close event', {...metaLog, roomId: this.mainRoomId, subRoomId});
                     this.io.to(socketId).emit('consumerClosed', metaLog);
                 }
             });
@@ -157,7 +135,6 @@ module.exports = class SubRoom extends BaseRoom {
         }
     }
 
-    // Remove a peer and its associated resources from the room
     async removePeer(socketId) {
         if (this.peers.has(socketId)) {
             const peer = this.peers.get(socketId);
@@ -171,25 +148,22 @@ module.exports = class SubRoom extends BaseRoom {
         }
     }
 
-    // Close a specific producer for a peer
     closeProducer(socketId, producerId) {
-         return this.peers.get(socketId).closeProducer(producerId);
+        return this.peers.get(socketId).closeProducer(producerId);
     }
 
-    // Broadcast a message to all peers except the sender
     broadCast(socketId, name, data) {
         this.io.to(this.mainRoomId).except(socketId).emit(name, data);
     }
 
-    // Get all connected peers in the room
     getPeers() {
         const peers = [];
         this.peers.forEach(p => {
             peers.push({
-                subRoomId:this.id,
-                socketId:p.id,
-                userId:p.userId,
-                extra:p.extra,
+                subRoomId: this.id,
+                socketId: p.id,
+                userId: p.userId,
+                extra: p.extra,
                 produce: []
             });
         });
@@ -198,22 +172,6 @@ module.exports = class SubRoom extends BaseRoom {
 
     getPeerCount() {
         return this.peers.size;
-    }
-
-    async pipeProducerToRemoteServer(producer, remoteServerUrl) {
-        await this.pipeManager.pipeProducer({
-            roomId: this.mainRoomId,
-            producer,
-            localRouter: this.router,
-            remoteServerUrl
-        });
-    }
-
-    addPipedConsumer(producerId, consumer) {
-        if (!this.pipedConsumers.has(producerId)) {
-            this.pipedConsumers.set(producerId, []);
-        }
-        this.pipedConsumers.get(producerId).push(consumer);
     }
 
     async close() {
@@ -226,6 +184,6 @@ module.exports = class SubRoom extends BaseRoom {
 
         await this.closePipeResources();
 
-        logger.info(` SubRoom closed`,{ roomId : this.mainRoomId, subRoomId : this.id });
+        logger.info(` SubRoom closed`, { roomId: this.mainRoomId, subRoomId: this.id });
     }
 }
