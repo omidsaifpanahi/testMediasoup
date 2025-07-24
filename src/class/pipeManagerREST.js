@@ -16,6 +16,7 @@ class PipeManagerREST {
         this.pipes = new Map();
         this.failedServers = new Map();
         this.FAIL_CACHE_TTL = 60 * 1000;
+        this.pipeLocks = new Map(); // remoteServerUrl => Promise
     }
 
     isServerFailedRecently(remoteServerUrl) {
@@ -42,54 +43,70 @@ class PipeManagerREST {
 
         const roomPipes = this.pipes.get(roomId);
 
-        let localPipeTransport;
-        try {
-            if (!roomPipes.has(remoteServerUrl)) {
-                localPipeTransport = await localRouter.createPipeTransport({ listenIp: "0.0.0.0" });
-
-                const { data: remoteInfo } = await axios.post(`${remoteServerUrl}/pipe/create`, {
+        const existingLock = this.pipeLocks.get(remoteServerUrl);
+        if (existingLock) {
+            await existingLock;
+        }
+    
+        const pipePromise = (async () => {
+            let localPipeTransport;
+    
+            try {
+                if (!roomPipes.has(remoteServerUrl)) {
+                    localPipeTransport = await localRouter.createPipeTransport({ listenIp: "0.0.0.0" });
+    
+                    const { data: remoteInfo } = await axios.post(`${remoteServerUrl}/pipe/create`, {
+                        roomId,
+                        subRoomId
+                    });
+    
+                    await localPipeTransport.connect({
+                        ip: remoteInfo.ip,
+                        port: remoteInfo.port
+                    });
+    
+                    await axios.post(`${remoteServerUrl}/pipe/connect`, {
+                        transportId: remoteInfo.id,
+                        ip: localPipeTransport.tuple.localIp,
+                        port: localPipeTransport.tuple.localPort
+                    });
+    
+                    roomPipes.set(remoteServerUrl, { transport: localPipeTransport });
+                } else {
+                    localPipeTransport = roomPipes.get(remoteServerUrl).transport;
+                }
+    
+                await axios.post(`${remoteServerUrl}/pipe/pipe-producer`, {
                     roomId,
-                    subRoomId
+                    subRoomId,
+                    producerId: producer.id
                 });
-
-                await localPipeTransport.connect({
-                    ip: remoteInfo.ip,
-                    port: remoteInfo.port
-                });
-
-                await axios.post(`${remoteServerUrl}/pipe/connect`, {
-                    transportId: remoteInfo.id,
-                    ip: localPipeTransport.tuple.localIp,
-                    port: localPipeTransport.tuple.localPort
-                });
-
-                roomPipes.set(remoteServerUrl, { transport: localPipeTransport });
-            } else {
-                localPipeTransport = roomPipes.get(remoteServerUrl).transport;
+    
+                if (this.failedServers.has(remoteServerUrl)) {
+                    this.failedServers.delete(remoteServerUrl);
+                }
+    
+                return { transport: localPipeTransport };
+    
+            } catch (err) {
+                if (localPipeTransport) {
+                    try { localPipeTransport.close(); } catch (_) {}
+                }
+    
+                this.failedServers.set(remoteServerUrl, Date.now());
+                throw new Error(`[pipeProducer] Failed with remote server ${remoteServerUrl}: ${err.message}`);
             }
-
-            await axios.post(`${remoteServerUrl}/pipe/pipe-producer`, {
-                roomId,
-                subRoomId,
-                producerId: producer.id
-            });
-            
-            if (this.failedServers.has(remoteServerUrl)) {
-                this.failedServers.delete(remoteServerUrl);
-            }
-
-            return { transport: localPipeTransport };
-
-        } catch (err) {            
-            if (localPipeTransport) {
-                try {
-                    localPipeTransport.close();
-                } catch (_) {}
-            }
-            this.failedServers.set(remoteServerUrl, Date.now());
-            throw new Error(`[pipeProducer] Failed with remote server ${remoteServerUrl}: ${err.message}`);
+        })();
+    
+        this.pipeLocks.set(remoteServerUrl, pipePromise);
+    
+        try {
+            return await pipePromise;
+        } finally {
+            this.pipeLocks.delete(remoteServerUrl);
         }
     }
+    
 
     async close() {
         for (const roomPipes of this.pipes.values()) {

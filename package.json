@@ -8,6 +8,7 @@
     "dev"                       : "NODE_ENV=development SERVER_PORT=3000 API_GETWAY=https://apigateway.dev.zituredev.ir DEBUG=mediasoup:ERROR:* nodemon src/server.js"
   },
   "dependencies": {
+    ""axios-retry"
     "axios"                         : "^1.10.0",
     "compression"                   : "^1.7.5",
     "express"                       : "^4.19.2",
