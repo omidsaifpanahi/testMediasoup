@@ -13,8 +13,8 @@ axiosRetry(axios, {
 
 class PipeManagerREST {
     constructor() {
-        this.pipes = new Map();
-        this.failedServers = new Map();
+        this.pipes = new Map(); // roomId => Map(remoteServerUrl => { transport, producers: Set, subRoomId })
+        this.failedServers = new Map(); // remoteServerUrl => timestamp
         this.FAIL_CACHE_TTL = 60 * 1000;
         this.pipeLocks = new Map(); // remoteServerUrl => Promise
     }
@@ -52,7 +52,9 @@ class PipeManagerREST {
             let localPipeTransport;
     
             try {
-                if (!roomPipes.has(remoteServerUrl)) {
+                let pipeEntry = roomPipes.get(remoteServerUrl);
+
+                if (!pipeEntry) {
                     localPipeTransport = await localRouter.createPipeTransport({ listenIp: "0.0.0.0" });
     
                     const { data: remoteInfo } = await axios.post(`${remoteServerUrl}/pipe/create`, {
@@ -70,18 +72,30 @@ class PipeManagerREST {
                         ip: localPipeTransport.tuple.localIp,
                         port: localPipeTransport.tuple.localPort
                     });
-    
-                    roomPipes.set(remoteServerUrl, { transport: localPipeTransport });
+
+                    pipeEntry = {
+                        transport: localPipeTransport,
+                        producers: new Set(),
+                        subRoomId
+                    };
+
+                    roomPipes.set(remoteServerUrl, pipeEntry);
                 } else {
-                    localPipeTransport = roomPipes.get(remoteServerUrl).transport;
+                    localPipeTransport = pipeEntry.transport;
+
+                    if (pipeEntry.producers.has(producer.id)) {
+                        return { transport: localPipeTransport };
+                    }
                 }
-    
+
                 await axios.post(`${remoteServerUrl}/pipe/pipe-producer`, {
                     roomId,
-                    subRoomId,
+                    subRoomId: pipeEntry.subRoomId,
                     producerId: producer.id
                 });
-    
+
+                pipeEntry.producers.add(producer.id);
+
                 if (this.failedServers.has(remoteServerUrl)) {
                     this.failedServers.delete(remoteServerUrl);
                 }
