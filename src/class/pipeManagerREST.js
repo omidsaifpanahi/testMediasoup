@@ -123,12 +123,20 @@ class PipeManagerREST {
     
 
     async close() {
-        for (const roomPipes of this.pipes.values()) {
-            for (const { transport } of roomPipes.values()) {
+        for (const [roomId, roomPipes] of this.pipes.entries()) {
+            for (const [remoteServerUrl, { transport }] of roomPipes.entries()) {
                 try {
                     transport.close();
                 } catch (err) {
-                    console.warn("Failed to close transport:", err.message);
+                    console.warn("Failed to close local transport:", err.message);
+                }
+                
+                try {
+                    await axios.post(`${remoteServerUrl}/pipe/close`, {
+                        roomId
+                    });
+                } catch (err) {
+                    console.warn(`Failed to notify remote server ${remoteServerUrl} to close pipe:`, err.message);
                 }
             }
         }
