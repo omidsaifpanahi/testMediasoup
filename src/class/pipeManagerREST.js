@@ -1,6 +1,6 @@
 // path: src/class/pipeManagerREST.js
 const axios = require("axios");
-const axiosRetry = require("axios-retry");
+const axiosRetry = require("axios-retry").default;
 
 axios.defaults.timeout = 5000;
 axiosRetry(axios, {
