@@ -37,6 +37,13 @@ class BaseRoom {
     }
 
     async pipeProducerToRemoteServer(producer, remoteServerUrl, subRoomId, localRouter) {
+
+        const existingPipe = this.pipeManager.pipes.get(this.mainRoomId)?.get(remoteServerUrl);
+        if (existingPipe?.producers?.has(producer.id)) {
+            console.debug(`Producer ${producer.id} already piped to ${remoteServerUrl}`);
+            return { success: true, alreadyPiped: true };
+        }
+
         try {
             const { transport } = await this.pipeManager.pipeProducer({
                 roomId: this.mainRoomId,
