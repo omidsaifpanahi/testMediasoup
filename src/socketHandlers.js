@@ -1,50 +1,25 @@
-// -- socketHandlers.js
-const logger        = require('./utilities/logger');
-const MainRoom      = require('./class/mainRoom');
-const Peer          = require('./class/peer');
+const logger = require('./utilities/logger');
+const MainRoom = require('./class/mainRoom');
+const Peer = require('./class/peer');
 const createWorkers = require("./utilities/createWorkers");
-const LoadBalancer  = require('./utilities/loadBalancer');
-const getLocalIp    = require('./config').mediasoup.webRtcTransport.listenIps[0].announcedIp;
+const LoadBalancer = require('./utilities/loadBalancer');
+const getLocalIp = require('./config').mediasoup.webRtcTransport.listenIps[0].announcedIp;
 const { remoteServers, listenPort } = require('./config');
 const myAddress = `${getLocalIp}:${listenPort}`;
 
 module.exports = async (io, roomList) => {
-
-    const workers      = await createWorkers();
+    const workers = await createWorkers();
     const loadBalancer = new LoadBalancer(workers);
-
-    /**
-     * @api {ws} /webcam/ connection Connect to WebSocket
-     * @apiName Connection
-     * @apiGroup Socket
-     * @apiDescription This event is triggered when the client connects to the WebSocket server
-     *
-     * @apiQuery {Number} userId Users unique ID.
-     * @apiQuery {Number} roomId
-     *
-     * @apiExample {javascript} Example usage:
-     * const socket    = io('wss://mediaserver.zituredev.ir/?roomId=1&userId=125', {
-     *   path: "/webcam/",
-     *   transport : ['websocket'],
-     * });
-     *
-     * socket.on('connect', () => {
-     *    console.log('Connected');
-     * });
-     */
 
     io.on('connection', async (socket) => {
         try {
-            // Extract roomId and userId from the socket handshake query.
-            const {roomId, userId, role} = socket.handshake.query;
+            const {roomId, userId} = socket.handshake.query;
             if (!roomId || !userId) {
                 return disconnectWithError(socket, 'Connection missing roomId/userId');
             }
 
-            // Associate the roomId with the socket.
             socket.join(roomId);
 
-            // Retrieve the current room instance.
             let currentMainRoom = roomList.get(roomId);
 
             const metaLog = {
@@ -53,11 +28,7 @@ module.exports = async (io, roomList) => {
                 userId
             };
 
-            // If the room doesn't exist, create a new MainRoom
             if (!currentMainRoom) {
-                // if (role !== 'owner') {
-                //     return disconnectWithError(socket, 'No available room'); 
-                // }
                 currentMainRoom = new MainRoom(roomId, io, loadBalancer);
                 roomList.set(roomId, currentMainRoom);
                 logger.info(`MainRoom created`,metaLog);
@@ -79,7 +50,7 @@ module.exports = async (io, roomList) => {
 
                 isSubRoomCreated = 1;
             } else {
-                const resultGetLeastLoadedSubRoom  = await currentMainRoom.getLeastLoadedSubRoom();
+                const resultGetLeastLoadedSubRoom = await currentMainRoom.getLeastLoadedSubRoom();
                 if (!resultGetLeastLoadedSubRoom.success) {
                     logger.info(resultGetLeastLoadedSubRoom.message,metaLog);
 
@@ -105,7 +76,6 @@ module.exports = async (io, roomList) => {
             if(socket.handshake.headers['user-agent'])
                 userExtra['user-agent'] = socket.handshake.headers['user-agent'];
 
-
             const cookies = socket.handshake.headers.cookie;
             if (cookies) {
                 const parsed = Object.fromEntries(
@@ -123,8 +93,6 @@ module.exports = async (io, roomList) => {
                 }       
             }
 
-
-            // Add the peer to the subRoom.
             currentSubRoom.addPeer(new Peer(metaLog,userExtra));
 
             let totalPeers = await currentMainRoom.getTotalPeers();
@@ -139,31 +107,13 @@ module.exports = async (io, roomList) => {
 
             logger.info('User joined', metaLog);
 
-            // Handle request for users in the room.--------------------------------------------------------------------
-            /**
-             * @api {socket} roomList Get room list users
-             * @apiGroup Users
-             * @apiDescription Request the list of users in the room.
-             */
-
             socket.on('getUsers', async () => {
-
-                let allPeers   =  await currentMainRoom.getAllPeers();
+                let allPeers = await currentMainRoom.getAllPeers();
                 socket.emit('usersList', allPeers);
                 delete allPeers;
             });
 
-
-            // Handle request for producers in the room.--------------------------------------------------------------------
-
-            /**
-             * @api {socket} getProducers Get Producers
-             * @apiGroup Producers
-             * @apiDescription Request the list of producers in the room.
-             */
-
             socket.on('getProducers', async () => {
-
                 let producerList = currentMainRoom.producers;
 
                 for (const producer of producerList) {
@@ -188,14 +138,6 @@ module.exports = async (io, roomList) => {
                 socket.emit('newProducers', producerList);
             });
 
-            // Handle request for Router RTP capabilities. -----------------------------------------------------------------
-
-            /**
-             * @api {socket} getRouterRtpCapabilities Get Router RTP Capabilities
-             * @apiGroup Router
-             * @apiDescription Retrieve RTP capabilities from the room's router.
-             */
-
             socket.on('getRouterRtpCapabilities', async (_, callback) => {
                 if (!requireCallback(callback, socket,'getRouterRtpCapabilities')) return;
 
@@ -208,15 +150,6 @@ module.exports = async (io, roomList) => {
                     callback({error: error.message});
                 }
             });
-
-            // Handle WebRTC transport creation request.--------------------------------------------------------------------
-
-            /**
-             * @api {socket} createWebRtcTransport Create WebRTC Transport
-             * @apiGroup Transport
-             * @apiDescription Create a new WebRTC transport for the peer.
-             * @apiParam {Object} params Transport parameters.
-             */
 
             socket.on('createWebRtcTransport', async (_, callback) => {
                 if (!requireCallback(callback, socket,'createWebRtcTransport')) return;
@@ -231,16 +164,6 @@ module.exports = async (io, roomList) => {
                     callback({error: 'Failed to create WebRTC transport'});
                 }
             });
-
-            // Handle transport connection request. ------------------------------------------------------------------------
-
-            /**
-             * @api {socket} connectTransport Connect Transport
-             * @apiGroup Transport
-             * @apiDescription Connect the peer's transport to the room.
-             * @apiParam {String} transportId ID of the transport.
-             * @apiParam {Object} dtlsParameters DTLS parameters.
-             */
 
             socket.on('connectTransport', async ({transportId, dtlsParameters}, callback) => {
                 if (!requireCallback(callback, socket,'connectTransport')) return;
@@ -259,19 +182,6 @@ module.exports = async (io, roomList) => {
                     callback({error: error.message});
                 }
             });
-
-
-            // Handle transport produce media. -----------------------------------------------------------------------------
-
-            /**
-             * @api {socket} produce Produce Media
-             * @apiGroup Media
-             * @apiDescription Create a media producer for the peer.
-             * @apiParam {String} kind Media kind (audio/video).
-             * @apiParam {Object} rtpParameters RTP parameters.
-             * @apiParam {String} producerTransportId ID of the producer's transport.
-             *  @apiParam {String} mediaType (audio/video/screen).
-             */
 
             socket.on('produce', async ({kind, rtpParameters, producerTransportId, mediaType}, callback) => {
                 if (!requireCallback(callback, socket,'produce')) return;
@@ -292,25 +202,29 @@ module.exports = async (io, roomList) => {
                         for (const remote of remoteServers) {
                             const remoteAddress = remote.url.replace(/^http:\/\//, '');
 
-                            if (remoteAddress === myAddress) {   
-                                logger.debug('Skipping pipe to self:', remote.url);                             
-                                continue;
-                            }
-                            
-                            try {
-                              await currentMainRoom.pipeProducerToRemoteServer(
-                                { id: result['producerId'] },
-                                remote.url,
-                                currentSubRoom.id,
-                                currentSubRoom.router
-                              );
-                            } catch (err) {
-                              logger.warn('pipeProducerToRemoteServer failed', {
-                                ...metaLog,
-                                remoteServerUrl: remote.url,
-                                error: err.message
-                              });
-                            }
+                            if (remoteAddress !== myAddress) {
+                                try {
+                                    await currentMainRoom.pipeProducerToRemoteServer(
+                                      { id: result['producerId'] },
+                                      remote.url,
+                                      currentSubRoom.id,
+                                      currentSubRoom.router
+                                    );
+      
+                                    logger.info("Producer piped to remote server", {
+                                      ...metaLog,
+                                      remoteServer: remote.url,
+                                      producerId: result['producerId']
+                                  });
+                                  } catch (err) {
+                                    logger.warn('pipeProducerToRemoteServer failed', {
+                                      ...metaLog,
+                                      remoteServerUrl: remote.url,
+                                      error: err.message
+                                    });
+                                  }
+
+                            }                            
                         }
 
                         logger.info(result['message'],{
@@ -329,10 +243,6 @@ module.exports = async (io, roomList) => {
                         currentSubRoom.broadCast(socket.id, 'newProducers', [options]);                
 
                         currentMainRoom.producers.push(options);
-                        
-                        
-                        // Optional: Pipe to remote server if needed
-                        // await currentSubRoom.pipeProducerToRemoteServer(result['producerObject'], remoteServerUrl);
                     }
                     else{
                         logger.error(result['message'],{
@@ -350,15 +260,6 @@ module.exports = async (io, roomList) => {
                 }
             });
 
-            // Handle producer close event. --------------------------------------------------------------------------------
-
-            /**
-             * @api {socket} producerClosed Producer Closed
-             * @apiGroup Media
-             * @apiDescription Handle the event when a producer is closed.
-             * @apiParam {String} producerId ID of the producer.
-             */
-
              socket.on('producerClosed', async ({ producerId }) => {
                 const { success, message } = currentSubRoom.closeProducer(socket.id, producerId);
             
@@ -372,26 +273,19 @@ module.exports = async (io, roomList) => {
                 }
             });
 
-            // Handle request to consume media. ----------------------------------------------------------------------------
-
-            /**
-             * @api {socket} consume Consume Media
-             * @apiGroup Media
-             * @apiDescription Create a media consumer for the peer.
-             * @apiParam {String} consumerTransportId ID of the consumer's transport.
-             * @apiParam {String} producerId ID of the producer.
-             * @apiParam {Object} rtpCapabilities RTP capabilities of the peer.
-             */
-
             socket.on('consume', async ({consumerTransportId, producerId, rtpCapabilities}, callback) => {
                 if (!requireCallback(callback, socket,'consume')) return;
 
                 try {
-                    const producer = currentMainRoom.getProducer(producerId);
-                    if(producer==null){
-                        callback({error: 'Producer not found!'});
+                    let producer = currentMainRoom.getProducer(producerId);
+                    if (!producer) {                        
+                        const found = currentMainRoom.findProducerAcrossSubRooms(producerId, currentSubRoom.id);
+                        producer = found.producer;
+                        if (!producer) {
+                            return callback({error: 'Producer not found!'});
+                        }
                     }
-                    // Create a consumer
+
                     const result = await currentSubRoom.consume(socket.id, consumerTransportId, rtpCapabilities,producer,currentSubRoom.id);
 
                     if(result['success'])
@@ -413,14 +307,6 @@ module.exports = async (io, roomList) => {
                 }
             });
 
-            // Handle peer's request to exit the room. ---------------------------------------------------------------------
-
-            /**
-             * @api {socket} exitRoom Exit Room
-             * @apiGroup Room
-             * @apiDescription Handle the event when a peer exits the room.
-             */
-
             socket.on('exitRoom', async (_, callback) => {
                 const { success, message, error } = await handlePeerExit(socket, currentSubRoom, roomId, roomList, logger, currentMainRoom);
                 if (success) {
@@ -437,14 +323,6 @@ module.exports = async (io, roomList) => {
                 }           
             });
 
-            // Handle socket disconnection. --------------------------------------------------------------------------------
-
-            /**
-             * @api {socket} disconnect Disconnect Event
-             * @apiGroup Connection
-             * @apiDescription Handle the event when a peer disconnects.
-             */
-
             socket.on('disconnect', async () => {
                 const { success, message, error,logMessage } = await handlePeerExit(socket, currentSubRoom, roomId, roomList, logger, currentMainRoom);
                 if (success) {
@@ -460,12 +338,8 @@ module.exports = async (io, roomList) => {
                 }
             });
 
-            /**
-             * @api {socket} closeRoom CloseRoom Event
-             * @apiGroup Connection
-             * @apiDescription Handle the event closeRoom.
-             */
             socket.on('closeRoom', async (_, callback) => {
+                await currentMainRoom.closePipeResources();
                 await currentMainRoom.destroyMainRoom();
                 roomList.delete(roomId);
                 io.sockets.adapter.rooms.delete(roomId);
@@ -474,70 +348,6 @@ module.exports = async (io, roomList) => {
                 callback('success');
             });
 
-            function sanitizeMessage(msg) {
-                if (typeof msg !== 'string') return null;
-        
-                const cleaned = msg
-                    .replace(/[<>]/g, '')
-                    .replace(/script/gi, '')
-                    .trim()
-                    .substring(0, 120);
-        
-                return cleaned.length > 0 ? cleaned : null;
-            }
-            socket.on('chat-message', async (msg) => {
-                try {
-                    const safeMsg = sanitizeMessage(msg);
-                    if (!safeMsg) return;
-
-                    const now = new Date();
-                    const timeStr = now.toTimeString().split(' ')[0];
-                
-                    const trimmedMsg = {
-                        userId,        
-                        text: safeMsg,
-                        extra: userExtra,
-                        time: timeStr
-                    };
-
-                    if (!currentMainRoom.chatHistory)
-                        currentMainRoom.chatHistory = [];
-
-                    currentMainRoom.chatHistory.push(trimmedMsg);
-
-                    if (currentMainRoom.chatHistory.length > 20) {
-                        currentMainRoom.chatHistory.shift();
-                    }
-
-                    currentMainRoom.broadCast('chat-message', trimmedMsg);
-                } catch (error) {
-                    logger.error('chat-message handler:', {...metaLog, error : error.message});
-                }
-            });
-
-            
-            socket.on('chatHistory', async () => {
-                socket.emit('chatHistory', currentMainRoom.chatHistory);
-            });
-
-
-            socket.on('reaction', (emoji) => {
-                try{
-                    if (typeof emoji !== 'string') return;
-                    const allowedReactions = ['👍', '👏', '✋', '👎'];
-                    if (!allowedReactions.includes(emoji)) return;            
-
-                    const reactionData = {
-                        emoji,
-                        userId,
-                        name: userExtra?.publicName || userId,
-                    };        
-
-                    currentMainRoom.broadCast('reaction', reactionData);
-                }  catch (error) {
-                    logger.error('reaction handler:', {...metaLog, error : error.message});
-                }
-            });
         } catch (err) {
             console.error('Unhandled error in connection handler:', { socketId: socket.id, error: err.message });
             socket.emit('error', 'Internal server error');
@@ -548,13 +358,18 @@ module.exports = async (io, roomList) => {
     async function handlePeerExit(socket, currentSubRoom, roomId, roomList, logger, mainRoomInstance) {
         try {
             mainRoomInstance.removeProducersBySocketId(socket.id);
-            // Remove the peer from the room.
+            
             const result = await currentSubRoom.removePeer(socket.id);
             if(result['success'])
             {
+                for (const producer of mainRoomInstance.producers) {
+                    if (producer.socketId === socket.id) {
+                        await mainRoomInstance.removePipedProducer(producer.producerId);
+                    }
+                }
+
                 const totalPeers = await mainRoomInstance.getTotalPeers();
 
-                // If no peers are left, delete the room.
                 if (totalPeers === 0 && roomList.has(roomId)) {                    
                     await mainRoomInstance.destroyMainRoom();
                     roomList.delete(roomId);
@@ -594,4 +409,3 @@ module.exports = async (io, roomList) => {
         socket.disconnect(true);
       }
 };
-
