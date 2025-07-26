@@ -62,6 +62,28 @@ class BaseRoom {
         }
     }
 
+    async removePipedProducer(producerId) {        
+        if (this.pipedConsumers.has(producerId)) {
+            for (const consumer of this.pipedConsumers.get(producerId)) {
+                try {
+                    consumer.close();
+                } catch (err) {
+                    console.warn("Failed to close pipedConsumer:", err.message);
+                }
+            }
+            this.pipedConsumers.delete(producerId);
+        }
+            
+        const roomPipes = this.pipeManager.pipes.get(this.mainRoomId);
+        if (roomPipes) {
+            for (const [remoteServerUrl, pipeEntry] of roomPipes.entries()) {
+                if (pipeEntry.producers.has(producerId)) {
+                    pipeEntry.producers.delete(producerId);
+                }
+            }
+        }
+    }
+
     async closePipeResources() {
         for (const transport of this.pipeTransports.values()) {
             try {

@@ -359,14 +359,17 @@ module.exports = async (io, roomList) => {
              * @apiParam {String} producerId ID of the producer.
              */
 
-            socket.on('producerClosed', ({producerId}) => {
-                const {success,message} = currentSubRoom.closeProducer(socket.id, producerId);
-                if(success){
-                    logger.info(message,{ ...metaLog, producerId });           
-                    currentMainRoom.removeProducerByPId(producerId);            
+             socket.on('producerClosed', async ({ producerId }) => {
+                const { success, message } = currentSubRoom.closeProducer(socket.id, producerId);
+            
+                if (success) {
+                    logger.info(message, { ...metaLog, producerId });
+            
+                    currentMainRoom.removeProducerByPId(producerId);
+                    await currentMainRoom.removePipedProducer(producerId);
+                } else {
+                    logger.error(message, { ...metaLog, producerId });
                 }
-                else
-                    logger.error(message,{ ...metaLog, producerId });
             });
 
             // Handle request to consume media. ----------------------------------------------------------------------------
