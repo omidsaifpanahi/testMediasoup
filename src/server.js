@@ -38,6 +38,7 @@ const compression   = require('compression');     // Enables gzip compression fo
 // Import custom modules for configuration, logging, WebSocket handling, and metrics
 const config                = require('./config/config');            // Custom configuration module
 const setupSocketHandlers   = require('./socketHandlers');    // WebSocket handlers setup
+const setupMetricsServer    = require('./prometheusMetrics'); // Prometheus metrics server setup
 // const verifyTokenMiddleware = require('./middlewares/verifyTokenMiddleware');
 
 // -------------------------------------------------------------------------------------------------

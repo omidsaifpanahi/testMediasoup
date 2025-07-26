@@ -1,29 +1,29 @@
 {
-  "name"                        : "ziture-mediasoup",
-  "version"                     : "2.0.0",
-  "main"                        : "app.js",
-  "type"                        : "commonjs",
-  "scripts": {    
-    "myhost"                    : "SET MEDIASOUP_LOG_LEVEL=warn &  SET   NODE_ENV=myhost &  DEBUG=\"mediasoup:*\" & nodemon src/server.js",
-    "dev"                       : "NODE_ENV=development SERVER_PORT=3000 API_GETWAY=https://apigateway.dev.zituredev.ir DEBUG=mediasoup:ERROR:* nodemon src/server.js"
+  "name": "ziture-mediasoup",
+  "version": "2.0.0",
+  "main": "app.js",
+  "type": "commonjs",
+  "scripts": {
+    "myhost": "SET MEDIASOUP_LOG_LEVEL=warn &  SET   NODE_ENV=myhost &  DEBUG=\"mediasoup:*\" & nodemon src/server.js",
+    "dev": "NODE_ENV=development SERVER_PORT=3000 API_GETWAY=https://apigateway.dev.zituredev.ir DEBUG=mediasoup:ERROR:* nodemon src/server.js"
   },
   "dependencies": {
-    ""axios-retry"
-    "axios"                         : "^1.10.0",
-    "compression"                   : "^1.7.5",
-    "express"                       : "^4.19.2",
-    "express-async-errors"          : "^3.1.1",
-    "hide-powered-by"               : "^1.1.0",
-    "httpolyglot"                   : "^0.1.2",
-    "ioredis"                       : "^5.5.0",
-    "mediasoup"                     : "^3.14.1",
-    "mediasoup-client"              : "^3.7.7",
-    "prom-client"                   : "^15.1.3",
-    "retry"                         : "^0.13.1",
-    "socket.io"                     : "^4.7.5",
-    "winston"                       : "^3.17.0",
-    "winston-daily-rotate-file"     : "^5.0.0",
-    "winston-transport-sentry-node" : "^2.8.0",
-    "@sentry/node"                  : "^7.1.1"
+    "@sentry/node": "^7.1.1",
+    "axios": "^1.10.0",
+    "axios-retry": "^4.5.0",
+    "compression": "^1.7.5",
+    "express": "^4.19.2",
+    "express-async-errors": "^3.1.1",
+    "hide-powered-by": "^1.1.0",
+    "httpolyglot": "^0.1.2",
+    "ioredis": "^5.5.0",
+    "mediasoup": "^3.14.1",
+    "mediasoup-client": "^3.7.7",
+    "prom-client": "^15.1.3",
+    "retry": "^0.13.1",
+    "socket.io": "^4.7.5",
+    "winston": "^3.17.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "winston-transport-sentry-node": "^2.8.0"
   }
 }
