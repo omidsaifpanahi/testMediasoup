@@ -4,6 +4,9 @@ const MainRoom      = require('./class/mainRoom');
 const Peer          = require('./class/peer');
 const createWorkers = require("./utilities/createWorkers");
 const LoadBalancer  = require('./utilities/loadBalancer');
+const getLocalIp    = require('./config').mediasoup.webRtcTransport.listenIps[0].announcedIp;
+const { remoteServers, listenPort } = require('./config');
+const myAddress = `${getLocalIp}:${listenPort}`;
 
 module.exports = async (io, roomList) => {
 
@@ -283,7 +286,32 @@ module.exports = async (io, roomList) => {
                         } catch (error) {
                             logger.warn('pipeToRouter failed in produce:', { ...metaLog, error: error.message });
                         }
+                        
                         callback({socketId:socket.id,producerId:result['producerId']});
+                        
+                        for (const remote of remoteServers) {
+                            const remoteAddress = remote.url.replace(/^http:\/\//, '');
+
+                            if (remoteAddress === myAddress) {   
+                                logger.debug('Skipping pipe to self:', remote.url);                             
+                                continue;
+                            }
+                            
+                            try {
+                              await currentMainRoom.pipeProducerToRemoteServer(
+                                { id: result['producerId'] },
+                                remote.url,
+                                currentSubRoom.id,
+                                currentSubRoom.router
+                              );
+                            } catch (err) {
+                              logger.warn('pipeProducerToRemoteServer failed', {
+                                ...metaLog,
+                                remoteServerUrl: remote.url,
+                                error: err.message
+                              });
+                            }
+                        }
 
                         logger.info(result['message'],{
                             ...metaLog,

@@ -25,7 +25,10 @@ module.exports = {
     listenPort             : process.env.SERVER_PORT || 5000, // Server port with an environment variable fallback
     sslCrt                 : '../ssl/cert.pem', // Path to SSL certificate file
     sslKey                 : '../ssl/key.pem', // Path to SSL key file
-    
+    remoteServers          : [
+        { url: 'http://37.152.188.96:3000'},
+        { url: 'http://188.121.122.196:3000'},
+    ],
     mediasoup  : {
         // Worker settings
         numWorkers: Math.max(os.cpus().length - 1, 1), // Number of Mediasoup workers, at least 1
